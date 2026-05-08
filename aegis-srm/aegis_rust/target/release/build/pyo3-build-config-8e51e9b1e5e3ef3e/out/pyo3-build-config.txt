@@ -1,0 +1,11 @@
+implementation=CPython
+version=3.14
+shared=true
+abi3=false
+lib_name=python314
+lib_dir=C:\Users\allio\AppData\Local\Python\pythoncore-3.14-64\libs
+executable=C:\Users\allio\AppData\Local\Python\pythoncore-3.14-64\python.exe
+pointer_width=64
+build_flags=
+python_framework_prefix=None
+suppress_build_script_link_lines=false

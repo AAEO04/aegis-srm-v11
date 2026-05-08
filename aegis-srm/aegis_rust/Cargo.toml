@@ -1,0 +1,17 @@
+[package]
+name = "aegis_rust"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "aegis_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py312"] }
+rayon = "1.10"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
