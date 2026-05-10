@@ -40,7 +40,7 @@ class DesignCertificate:
     # Identity
     certificate_id:   str         # SHA-256 of the content
     run_id:           str
-    version:          str = "AEGIS-SRM-v8"
+    version:          str = "AEGIS-SRM-v11"
 
     # Sign-off
     signed_by:        str = ""
@@ -85,6 +85,7 @@ class DesignCertificate:
 
     def __post_init__(self):
         # Prevent accidental mutation after creation
+        # This works because @dataclass sets all attributes using object.__setattr__ before this is called
         object.__setattr__(self, "_frozen", True)
 
     def __setattr__(self, name, value):
@@ -153,7 +154,7 @@ def certify(
         "signed_by":       signed_by,
         "organisation":    organisation,
         "notes":           extra_notes,
-        "aegis_version":   "AEGIS-SRM-v8",
+        "aegis_version":   "AEGIS-SRM-v11",
         "timestamp":       timestamp,
     }
 

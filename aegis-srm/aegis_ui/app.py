@@ -3,6 +3,8 @@ AEGIS-SRM — Streamlit UI
 Run: streamlit run aegis_ui/app.py
 """
 import streamlit as st
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 st.set_page_config(
     page_title="AEGIS-SRM",
@@ -10,6 +12,14 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+def _load_custom_css():
+    css_path = os.path.join(os.path.dirname(__file__), "custom.css")
+    if os.path.exists(css_path):
+        with open(css_path, "r") as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+_load_custom_css()
 
 # ── Sidebar navigation ────────────────────────────────────────────────────────
 st.sidebar.title("🚀 AEGIS-SRM")
@@ -23,7 +33,7 @@ page = st.sidebar.radio(
 )
 
 st.sidebar.divider()
-st.sidebar.caption("v7  ·  68 parameters  ·  NASA-validated")
+st.sidebar.caption("v11  ·  68 parameters  ·  NASA-validated")
 
 # ── Page routing ──────────────────────────────────────────────────────────────
 if page == "Mission Intake":

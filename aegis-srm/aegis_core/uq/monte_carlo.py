@@ -32,7 +32,7 @@ class UQResult:
     means: dict[str, float]
     std_devs: dict[str, float]
     confidence_intervals: dict[str, tuple[float, float]]
-    sobol_indices: dict[str, dict[str, float]]   # output → {param: S1}
+    variance_fractions: dict[str, dict[str, float]]   # output → {param: frac}
     failure_probability: float
     converged: bool
     adversarial_failures: int = 0     # worst-case ±3σ failures (diagnostic only)
@@ -147,8 +147,8 @@ def run_monte_carlo(
             float(np.percentile(clean, 100 * (1 - alpha / 2))),
         )
 
-    # Sobol first-order indices (Saltelli estimator approximation)
-    sobol = _estimate_sobol(params, output_keys, output_arrays, rng)
+    # Input variance fractions
+    variance_fracs = _estimate_variance_fractions(params, output_keys, output_arrays, rng)
 
     return UQResult(
         n_samples=effective_n,
@@ -156,35 +156,34 @@ def run_monte_carlo(
         means=means,
         std_devs=stds,
         confidence_intervals=cis,
-        sobol_indices=sobol,
+        variance_fractions=variance_fracs,
         failure_probability=mc_failures / n if n > 0 else 0.0,
         converged=effective_n >= 50,
         adversarial_failures=adversarial_failures,
     )
 
 
-def _estimate_sobol(
+def _estimate_variance_fractions(
     params: list[UncertainParameter],
     output_keys: list[str],
     output_arrays: dict[str, np.ndarray],
     rng: np.random.Generator,
 ) -> dict[str, dict[str, float]]:
     """
-    Approximate first-order Sobol sensitivity indices via variance decomposition.
-    Uses a simplified correlation-based approach for speed.
+    Approximate input variance fractions.
     """
-    sobol: dict[str, dict[str, float]] = {}
+    variance_fracs: dict[str, dict[str, float]] = {}
     for k in output_keys:
         arr = output_arrays[k]
         clean = arr[~np.isnan(arr)]
         if len(clean) == 0 or np.var(clean) == 0:
-            sobol[k] = {p.name: 0.0 for p in params}
+            variance_fracs[k] = {p.name: 0.0 for p in params}
             continue
-        # Proxy: S1_i ≈ std_dev_i / sum(std_devs) (normalised contribution)
+        # Normalised variance contribution
         variances = np.array([p.std_dev ** 2 for p in params])
         total = variances.sum()
-        sobol[k] = {
+        variance_fracs[k] = {
             p.name: round(float(v / total), 3)
             for p, v in zip(params, variances)
         }
-    return sobol
+    return variance_fracs

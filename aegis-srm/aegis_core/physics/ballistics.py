@@ -78,15 +78,30 @@ def simulate_ballistics(
         if V_c <= 0 or A_b <= 0:
             break  # grain exhausted
 
+        def derivatives(P_curr, web_curr):
+            A_b_curr = grain.burn_area(web_curr)
+            V_c_curr = grain.port_volume(web_curr)
+            if V_c_curr <= 0 or A_b_curr <= 0:
+                return 0.0, 0.0
+            r_curr = burn_rate(propellant.burn_rate_coeff, propellant.burn_rate_exp, P_curr)
+            m_dot_gen_curr = propellant.density * A_b_curr * r_curr
+            m_dot_exit_curr = (P_curr * nozzle_throat_area) / propellant.char_velocity
+            dP_dt_curr = (R_gas * propellant.combustion_temp / V_c_curr) * (m_dot_gen_curr - m_dot_exit_curr)
+            return dP_dt_curr, r_curr
+
         r = burn_rate(propellant.burn_rate_coeff, propellant.burn_rate_exp, P)
-        m_dot_gen = propellant.density * A_b * r
-        m_dot_exit = (P * nozzle_throat_area) / propellant.char_velocity
+        
+        # RK4 Integration
+        dP1, dw1 = derivatives(P, web)
+        dP2, dw2 = derivatives(P + 0.5 * dt * dP1, web + 0.5 * dt * dw1)
+        dP3, dw3 = derivatives(P + 0.5 * dt * dP2, web + 0.5 * dt * dw2)
+        dP4, dw4 = derivatives(P + dt * dP3, web + dt * dw3)
 
-        dP_dt = (R_gas * propellant.combustion_temp / V_c) * (m_dot_gen - m_dot_exit)
+        P_new = P + (dt / 6.0) * (dP1 + 2*dP2 + 2*dP3 + dP4)
+        web_new = web + (dt / 6.0) * (dw1 + 2*dw2 + 2*dw3 + dw4)
 
-        # Explicit Euler (swap to RK4 for production)
-        P = max(P + dP_dt * dt, 0.0)
-        web += r * dt
+        P = max(P_new, 0.0)
+        web = web_new
         t += dt
 
         thrust = nozzle_cf * nozzle_throat_area * P

@@ -111,9 +111,60 @@ def render():
     steps = ["Mission type", "Payload", "Target altitude", "Propellant", "Review & run"]
     step  = st.session_state.get("intake_step", 0)
 
+    # ── Sidebar Mission Brief ─────────────────────────────────────────────────
+    with st.sidebar:
+        st.subheader("🚀 Mission Brief")
+        mtype = st.session_state.get("mission_type", "—").split()[0]
+        pmass = st.session_state.get("payload_mass", 0.0)
+        talt = st.session_state.get("alt_km", 0)
+        talt_str = f"{talt} km" if talt else st.session_state.get("dest", "—")
+        prop = _PROP_LABELS.get(st.session_state.get("propellant", ""), "—").split('(')[0].strip()
+        case = _CASE_MAT_LABELS.get(st.session_state.get("case_material", ""), "—").split('(')[0].strip()
+
+        st.markdown(f"**Type:** {mtype}  \n**Payload:** {pmass} kg  \n**Target:** {talt_str}  \n**Prop:** {prop}  \n**Case:** {case}")
+        
+        if step >= 2:
+            try:
+                from aegis_core.data.research_db import DESTINATION_DV_DB
+                dv = 0
+                if talt:
+                    key = f"{talt}km"
+                    if key in DESTINATION_DV_DB:
+                        dv = DESTINATION_DV_DB[key]["dv"].value
+                elif st.session_state.get("dest"):
+                    key = st.session_state.get("dest")
+                    if key in DESTINATION_DV_DB:
+                        dv = DESTINATION_DV_DB[key]["dv"].value
+                
+                if dv > 0:
+                    isp = 242.0 # default fallback
+                    from aegis_core.data.research_db import PROPELLANT_DB
+                    pkey = st.session_state.get("propellant", "apcp_htpb")
+                    if pkey in PROPELLANT_DB:
+                        isp = PROPELLANT_DB[pkey]["isp_sl"].value
+                    
+                    import math
+                    mr = math.exp(dv / (isp * 9.80665))
+                    st.divider()
+                    st.metric("Est. ΔV", f"{dv:,.0f} m/s")
+                    feasible = "✅ Single-stage" if mr < 6.0 else ("⚠️ Marginal" if mr < 8.0 else "❌ Infeasible")
+                    st.metric("Mass ratio", f"{mr:.2f}", delta=feasible, delta_color="normal" if mr < 6 else "inverse")
+            except Exception:
+                pass
+
+
     # ── Step progress bar ─────────────────────────────────────────────────────
-    st.progress(step / max(len(steps) - 1, 1),
-                text=f"Step {step + 1} of {len(steps)} — {steps[step]}")
+    cols = st.columns(len(steps))
+    for i, step_name in enumerate(steps):
+        with cols[i]:
+            if i < step:
+                if st.button(f"✅ {step_name}", key=f"step_btn_{i}", use_container_width=True):
+                    st.session_state["intake_step"] = i
+                    st.rerun()
+            elif i == step:
+                st.button(f"🔵 {step_name}", key=f"step_btn_{i}", use_container_width=True, disabled=True)
+            else:
+                st.button(f"○ {step_name}", key=f"step_btn_{i}", use_container_width=True, disabled=True)
     st.divider()
 
     # ── Step 0: Mission type ──────────────────────────────────────────────────
@@ -286,28 +337,37 @@ def render():
 
         # ── Motor case (pressure vessel) ─────────────────────────────────────
         st.markdown("**Motor case** — *pressure vessel, sized by hoop stress at MEOP*")
-        case_col, case_info = st.columns([3, 2])
-        with case_col:
-            _case_default = _CASE_MAT_LABELS.get(
-                st.session_state.get("case_material", "cf_epoxy"),
-                list(_CASE_MAT_LABELS.values())[0]
-            )
-            case_material = st.selectbox(
-                "Case material",
-                list(_CASE_MAT_LABELS.values()),
-                index=list(_CASE_MAT_LABELS.values()).index(_case_default),
-            )
-            mat_key = {v: k for k, v in _CASE_MAT_LABELS.items()}[case_material]
-            st.session_state["case_material"] = mat_key
-        with case_info:
-            _CASE_INFO = {
-                "cf_epoxy":   ("ρ = 1 600 kg/m³", "Yield: 1 800 MPa  |  Lightest"),
-                "al_7075":    ("ρ = 2 810 kg/m³", "Yield:   480 MPa  |  Heritage"),
-                "steel_d6ac": ("ρ = 7 850 kg/m³", "Yield: 1 590 MPa  |  Lowest cost"),
-            }
-            d_str, s_str = _CASE_INFO.get(mat_key, ("", ""))
-            st.metric("Case density", d_str)
-            st.caption(s_str)
+        
+        _CASE_INFO = {
+            "cf_epoxy":   {"title": "CF / epoxy composite", "desc": "Lightest", "rho": "1,600", "yield": "1,800", "mass_bar": "▓░░░░"},
+            "al_7075":    {"title": "Aluminium 7075-T6", "desc": "Heritage", "rho": "2,810", "yield": "480", "mass_bar": "▓▓▓░░"},
+            "steel_d6ac": {"title": "D6AC steel", "desc": "Lowest cost", "rho": "7,850", "yield": "1,590", "mass_bar": "▓▓▓▓▓"},
+        }
+        
+        cols = st.columns(3)
+        current_case = st.session_state.get("case_material", "cf_epoxy")
+        for i, (mat_key, info) in enumerate(_CASE_INFO.items()):
+            with cols[i]:
+                is_selected = current_case == mat_key
+                border_color = "#6366F1" if is_selected else "#334155"
+                bg_color = "rgba(99, 102, 241, 0.1)" if is_selected else "transparent"
+                
+                html = f"""
+                <div style="border: 2px solid {border_color}; border-radius: 8px; padding: 16px; background-color: {bg_color}; cursor: pointer; height: 100%;">
+                    <h4 style="margin-top: 0; margin-bottom: 4px;">{info['title']}</h4>
+                    <p style="color: #94A3B8; font-size: 0.85em; margin-top: 0;">{info['desc']}</p>
+                    <hr style="margin: 8px 0; border-color: #334155;">
+                    <div style="font-family: monospace; font-size: 0.9em;">
+                        ρ: {info['rho']} kg/m³<br>
+                        σ: {info['yield']} MPa<br>
+                        Mass: {info['mass_bar']}
+                    </div>
+                </div>
+                """
+                st.markdown(html, unsafe_allow_html=True)
+                if st.button("Select" if not is_selected else "Selected", key=f"btn_case_{mat_key}", use_container_width=True, disabled=is_selected):
+                    st.session_state["case_material"] = mat_key
+                    st.rerun()
 
         st.divider()
 
@@ -404,12 +464,32 @@ def render():
             st.session_state["n_fins"] = fins_sel
 
         with cfg3:
-            st.caption(
-                {"3": "▲  3 fins — 120° spacing. Lighter but lower roll damping.",
-                 "4": "✦  4 fins — 90° spacing. Standard configuration, all presets.",
-                 "6": "⬡  6 fins — 60° spacing. High-drag mission / max stability.",
-                }.get(str(fins_sel), "")
+            _GRAIN_LABELS = {
+                "BATES": "BATES (auto-sized by engine)",
+                "star": "Star (progressive-regressive)",
+                "finocyl": "Finocyl (high loading)",
+                "end_burning": "End-burning (long duration)"
+            }
+            _grain_default = _GRAIN_LABELS.get(
+                st.session_state.get("grain_type", "BATES"), "BATES (auto-sized by engine)"
             )
+            grain_sel = st.selectbox(
+                "Grain geometry type",
+                list(_GRAIN_LABELS.values()),
+                index=list(_GRAIN_LABELS.values()).index(_grain_default),
+                help="AEGIS inverse design natively targets BATES. Non-BATES selections will use standard parametric approximations."
+            )
+            st.session_state["grain_type"] = {v: k for k, v in _GRAIN_LABELS.items()}[grain_sel]
+
+        with st.expander("Grain geometry comparison", expanded=False):
+            try:
+                from aegis_core.cad.grain_geometries import grain_comparison
+                import pandas as pd
+                # Assume a standard 150mm diam, 1m length motor for comparison
+                comp_data = grain_comparison(0.075, 1.0, 0.005)
+                st.dataframe(pd.DataFrame(comp_data), hide_index=True, use_container_width=True)
+            except Exception:
+                st.caption("Grain comparison data unavailable.")
 
         st.divider()
         tvc = st.checkbox("Require thrust vector control (TVC)",
@@ -583,14 +663,16 @@ def _run_design():
     constraints = _constraints_from_session()
 
     with st.status("Running AEGIS design pipeline...", expanded=True) as status:
-        st.write("Inverse design engine...")
         t0 = time.time()
         orch = AEGISOrchestrator(
             run_id="streamlit_run",
             uq_config=UQConfig(n_samples=200),
             constraints=constraints,
         )
-        result = orch.run_from_intent(intent)
+        def _prog_cb(msg):
+            st.write(msg)
+            
+        result = orch.run_from_intent(intent, progress_cb=_prog_cb)
         elapsed = time.time() - t0
         st.write(f"Done in {elapsed:.1f}s")
 

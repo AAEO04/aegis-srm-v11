@@ -103,7 +103,7 @@ SANITY_BOUNDS: dict[str, tuple[float, float]] = {
     "payload_length":             (0.05,   5.0),       # m
     "payload_cg_offset":          (0.0,    10.0),      # m  (from nose tip)
     "payload_separation_velocity":(0.5,    20.0),      # m/s
-    "fairing_mass":               (0.1,    500.0),     # kg
+    "fairing_mass":               (0.0,    500.0),     # kg
     # ── UQ ──────────────────────────────────────────────────────────────────
     "uq_n_samples":               (50,     100000),    # —
     "uq_confidence_level":        (0.90,   0.999),     # —

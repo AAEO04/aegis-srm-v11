@@ -67,7 +67,6 @@ PROPELLANT_DB = {
         "burn_rate_n":    RefValue(0.38, "—", "JANNAF SPD", 0.83),
         "two_phase_eff":  RefValue(0.97, "—", "JANNAF no metal fuel", 0.85),
         "o_f_ratio":      RefValue(0.0, "—", "Monopropellant", 0.95),
-        "isp_sl":         RefValue(210, "s", "JANNAF SPD", 0.88),
     },
     "HTPB_P80": {
         "isp_sl":         RefValue(237, "s", "ESA/Avio P80 qualification data public", 0.94),

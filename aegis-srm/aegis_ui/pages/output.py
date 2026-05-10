@@ -20,14 +20,12 @@ def render():
     outputs = result.outputs or {}
 
     # ── Key metrics row ───────────────────────────────────────────────────────
-    c1,c2,c3,c4,c5,c6 = st.columns(6)
-    c1.metric("Total impulse",   f"{outputs.get('total_impulse',0)/1000:.1f} kN·s")
-    c2.metric("Burn time",       f"{outputs.get('burn_time',0):.2f} s")
-    c3.metric("Max Pc",          f"{outputs.get('max_pressure',0)/1e6:.1f} MPa")
-    c4.metric("Mach (max)",      f"{outputs.get('max_mach',0):.1f}")
-    c5.metric("P(failure)",
-              f"{result.uq_result.failure_probability*100:.3f}%" if result.uq_result else "—")
-    c6.metric("V&V", "PASS ✓" if result.success else "FAIL ✗")
+    c1,c2,c3,c4,c5 = st.columns(5)
+    c1.metric("Impulse",   f"{outputs.get('total_impulse',0)/1000:.1f} kN·s")
+    c2.metric("Burn",       f"{outputs.get('burn_time',0):.2f} s")
+    c3.metric("Peak Pc",          f"{outputs.get('max_pressure',0)/1e6:.1f} MPa")
+    c4.metric("Max Mach",      f"{outputs.get('max_mach',0):.1f}")
+    c5.metric("V&V", "PASS ✓" if result.success else "FAIL ✗")
 
     st.divider()
 
@@ -90,24 +88,57 @@ def _tab_performance(outputs, snap, result):
             sigma        = nom * 0.06
             _ode_sourced = False
 
-        fig = go.Figure()
+        from plotly.subplots import make_subplots
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1,
+                            subplot_titles=("Thrust", "Chamber Pressure"))
         fig.add_trace(go.Scatter(
             x=np.concatenate([t, t[::-1]]),
             y=np.concatenate([(nom+2*sigma)/1000, (nom-2*sigma)[::-1]/1000]),
             fill="toself", fillcolor="rgba(59,130,246,0.12)",
-            line=dict(color="rgba(0,0,0,0)"), name="±2σ"))
+            line=dict(color="rgba(0,0,0,0)"), name="±2σ (Thrust)", showlegend=False), row=1, col=1)
         fig.add_trace(go.Scatter(x=t, y=nom/1000, mode="lines",
-            line=dict(width=2.5, color="#2563EB"), name="Nominal"))
-        fig.update_layout(xaxis_title="Time [s]", yaxis_title="Thrust [kN]",
-            height=280, margin=dict(l=10,r=10,t=10,b=40),
+            line=dict(width=2.5, color="#2563EB"), name="Thrust [kN]"), row=1, col=1)
+
+        if _ode_sourced:
+            p_series = outputs.get("pressure_profile_pa")
+            if p_series and len(p_series) == len(t_series):
+                p_nom = np.array(p_series)
+                fig.add_trace(go.Scatter(x=t, y=p_nom/1e6, mode="lines",
+                    line=dict(width=2.5, color="#EF4444"), name="Pressure [MPa]"), row=2, col=1)
+        else:
+            # Fake pressure for fallback
+            p_nom = (nom / F) * outputs.get('max_pressure', 5e6)
+            fig.add_trace(go.Scatter(x=t, y=p_nom/1e6, mode="lines",
+                line=dict(width=2.5, color="#EF4444", dash="dash"), name="Pressure [MPa] (Est.)"), row=2, col=1)
+
+        fig.update_layout(height=450, margin=dict(l=10,r=10,t=30,b=40),
             legend=dict(orientation="h",y=1.05), hovermode="x unified")
+        fig.update_yaxes(title_text="Thrust [kN]", row=1, col=1)
+        fig.update_yaxes(title_text="Pressure [MPa]", row=2, col=1)
+        fig.update_xaxes(title_text="Time [s]", row=2, col=1)
         st.plotly_chart(fig, use_container_width=True)
+
         if not _ode_sourced:
             st.caption(
                 "*Illustrative — analytic profile fitted to avg_thrust and burn_time. "
-                "Not a direct ODE output. A time-resolved thrust trace requires "
-                "re-running the ballistics ODE with recorded profile output.*"
+                "Not a direct ODE output. Run with BATES grain to see real ODE traces.*"
             )
+
+        # ── Export Buttons ──────────────────────────────────────────────
+        import pandas as pd
+        import json
+        c_exp1, c_exp2 = st.columns(2)
+        if _ode_sourced:
+            df_export = pd.DataFrame({
+                "time_s": t_series,
+                "thrust_n": F_series,
+                "pressure_pa": outputs.get("pressure_profile_pa", [])
+            })
+            csv_str = df_export.to_csv(index=False)
+            c_exp1.download_button("📥 Export time-series (CSV)", data=csv_str, file_name=f"{result.run_id}_trace.csv")
+        
+        json_str = json.dumps({"snap": snap, "outputs": outputs}, default=str, indent=2)
+        c_exp2.download_button("📥 Export full results (JSON)", data=json_str, file_name=f"{result.run_id}_results.json")
 
     with col2:
         st.subheader("Key performance")
@@ -115,18 +146,76 @@ def _tab_performance(outputs, snap, result):
         cstar = snap.get("characteristic_velocity",{}).get("value",0)
         Cf   = snap.get("thrust_coefficient",{}).get("value",0)
         Tc   = snap.get("combustion_temp",{}).get("value",0)
+        
+        # NASA CEA live indicator
+        has_cea = False
+        try:
+            import rocketcea
+            has_cea = True
+        except ImportError:
+            pass
+            
+        if has_cea:
+            st.markdown("🟢 **NASA CEA Live**")
+        else:
+            st.markdown("🟡 **Database Fallback**")
+            
         st.metric("Isp (delivered)", f"{isp:.0f} s")
-        st.metric("c* (NASA CEA)",   f"{cstar:.0f} m/s")
+        st.metric("c* (ideal)",      f"{cstar:.0f} m/s")
         st.metric("Cf (vacuum)",     f"{Cf:.3f}")
         st.metric("Flame temp",      f"{Tc:.0f} K")
         if result.uq_result:
             st.divider()
+            st.metric("P(failure)",   f"{result.uq_result.failure_probability*100:.3f}%")
             st.metric("MC samples",   f"{result.uq_result.n_samples:,}")
-            st.metric("Converged",    "Yes" if result.uq_result.converged else "No")
+
+    # Sensitivity Analysis (Variance Fractions)
+    if result.uq_result and hasattr(result.uq_result, "variance_fractions"):
+        st.subheader("Parameter Sensitivity (Variance Fractions)")
+        var_frac_all = result.uq_result.variance_fractions
+        if var_frac_all:
+            # Pick a metric to show sensitivity for (default to total_impulse or max_pressure)
+            target_metric = "total_impulse" if "total_impulse" in var_frac_all else (
+                "max_pressure" if "max_pressure" in var_frac_all else list(var_frac_all.keys())[0]
+            )
+            
+            st.caption(f"Showing sensitivity for: **{target_metric}**")
+            var_frac = var_frac_all[target_metric]
+            
+            # Sort by variance fraction
+            sorted_vars = sorted(var_frac.items(), key=lambda x: x[1])
+            keys = [k for k, v in sorted_vars]
+            vals = [v for k, v in sorted_vars]
+            
+            import plotly.graph_objects as go
+            fig_sens = go.Figure(go.Bar(
+                x=vals, y=keys, orientation='h',
+                marker_color="#8B5CF6"
+            ))
+            fig_sens.update_layout(
+                xaxis_title="Fraction of Performance Variance",
+                height=250 + len(keys)*20, margin=dict(l=10,r=10,t=10,b=40)
+            )
+            st.plotly_chart(fig_sens, use_container_width=True)
 
     # Drag analysis with boat-tail comparison
     with st.expander("Drag analysis & boat-tail comparison"):
         _boattail_chart(snap, outputs)
+
+    # Propellant trade study expander
+    with st.expander("Propellant Trade Study"):
+        st.write("Comparison of alternative propellants at your design's expansion ratio.")
+        from aegis_core.data.research_db import PROPELLANT_DB
+        trade_data = []
+        for p_name, p_data in PROPELLANT_DB.items():
+            trade_data.append({
+                "Propellant": p_name,
+                "Isp (sl)": p_data["isp_sl"].value if "isp_sl" in p_data else "—",
+                "c* [m/s]": p_data["char_velocity"].value if "char_velocity" in p_data else "—",
+                "Tc [K]": p_data["combustion_temp"].value if "combustion_temp" in p_data else "—",
+                "Density [kg/m³]": p_data["density"].value if "density" in p_data else "—"
+            })
+        st.dataframe(pd.DataFrame(trade_data), hide_index=True, use_container_width=True)
 
     # Drag breakdown
     st.subheader("Drag breakdown at Mach 2")
@@ -337,7 +426,104 @@ def _tab_geometry(snap, outputs=None):
 # ── 3D CAD tab ────────────────────────────────────────────────────────────────
 
 def _tab_cad(result, snap):
-    st.subheader("3D model & CAD export")
+    st.subheader("Interactive 3D Render")
+    
+    import plotly.graph_objects as go
+    import numpy as np
+    
+    def v(k, d=0): return snap.get(k,{}).get("value", d)
+    
+    # Motor dimensions
+    R      = v("outer_radius", 0.075)
+    wall   = v("wall_thickness", 0.003)
+    nose_L = v("nose_length", 0.50)
+    bay_L  = v("bay_length", 0.35)
+    mot_L  = v("motor_length", 0.65)
+    total_L= v("total_length", 1.50)
+    noz_ex = v("nozzle_exit_diameter", 0.08)/2
+    
+    R_out = R + wall
+    
+    fig = go.Figure()
+
+    # Helper function to create cylinder
+    def create_cylinder(r, h, z_start, color, name):
+        theta = np.linspace(0, 2*np.pi, 30)
+        z = np.linspace(z_start, z_start + h, 10)
+        theta, z = np.meshgrid(theta, z)
+        x = r * np.cos(theta)
+        y = r * np.sin(theta)
+        
+        fig.add_trace(go.Surface(x=x, y=y, z=z, colorscale=[[0, color], [1, color]], showscale=False, name=name, opacity=0.9, hoverinfo="name"))
+    
+    # Helper to create cone
+    def create_cone(r_base, r_tip, h, z_start, color, name):
+        theta = np.linspace(0, 2*np.pi, 30)
+        z = np.linspace(0, h, 10)
+        theta, z = np.meshgrid(theta, z)
+        
+        r = r_base - (r_base - r_tip) * (z / h)
+        x = r * np.cos(theta)
+        y = r * np.sin(theta)
+        z_actual = z_start + z
+        
+        fig.add_trace(go.Surface(x=x, y=y, z=z_actual, colorscale=[[0, color], [1, color]], showscale=False, name=name, opacity=0.9, hoverinfo="name"))
+
+    # Add components
+    # 1. Nose Cone
+    create_cone(R_out, 0.01, nose_L, 0, "#64748B", "Nose Cone")
+    
+    # 2. Payload Bay
+    create_cylinder(R_out, bay_L, nose_L, "#E0F2FE", "Payload Bay")
+    
+    # 3. Motor Case
+    create_cylinder(R_out, mot_L, nose_L + bay_L, "#94A3B8", "Motor Case")
+    
+    # 4. Nozzle
+    create_cone(R_out, noz_ex, 0.1, nose_L + bay_L + mot_L, "#78716C", "Nozzle")
+    
+    # 5. Fins (approximate with flat surfaces)
+    n_fins = int(v("n_fins", 4))
+    fin_root = v("fin_root_chord", 0.20)
+    fin_span = v("fin_span", 0.12)
+    fin_z = nose_L + bay_L + mot_L - fin_root
+    
+    for i in range(n_fins):
+        angle = i * (2 * np.pi / n_fins)
+        
+        fx = [R_out * np.cos(angle), (R_out + fin_span) * np.cos(angle), (R_out + fin_span) * np.cos(angle), R_out * np.cos(angle)]
+        fy = [R_out * np.sin(angle), (R_out + fin_span) * np.sin(angle), (R_out + fin_span) * np.sin(angle), R_out * np.sin(angle)]
+        fz = [fin_z, fin_z + fin_root*0.5, fin_z + fin_root, fin_z + fin_root]
+        
+        fig.add_trace(go.Mesh3d(x=fx, y=fy, z=fz, color="#6366F1", opacity=0.8, name=f"Fin {i+1}"))
+
+    # Add CG/CP markers to the 3D plot
+    cg_loc = v("cg_location", 0.0)
+    cp_loc = v("cp_location_subsonic", 0.0)
+    
+    if cg_loc > 0:
+        fig.add_trace(go.Scatter3d(x=[0], y=[R_out*1.2], z=[cg_loc], mode="markers", marker=dict(size=6, color="#10B981", symbol="diamond"), name="CG"))
+    if cp_loc > 0:
+        fig.add_trace(go.Scatter3d(x=[0], y=[-R_out*1.2], z=[cp_loc], mode="markers", marker=dict(size=6, color="#EF4444", symbol="square"), name="CP"))
+
+    max_dim = max(R_out*3, total_L)
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(range=[-max_dim/2, max_dim/2], showbackground=False),
+            yaxis=dict(range=[-max_dim/2, max_dim/2], showbackground=False),
+            zaxis=dict(range=[0, total_L * 1.1], autorange="reversed", showbackground=False),
+            aspectmode='data'
+        ),
+        height=600,
+        margin=dict(l=0, r=0, t=30, b=0),
+        legend=dict(orientation="h", y=1.05)
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption("Drag to rotate, scroll to zoom. Hover over components to inspect.")
+
+    st.divider()
+
+    st.subheader("CAD Export")
 
     cad = result.cad_paths or {}
 

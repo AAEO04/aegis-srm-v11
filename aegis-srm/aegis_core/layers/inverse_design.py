@@ -90,11 +90,17 @@ def _build_mat_lookup(key: str) -> dict:
         "source":         m["yield_strength"].source,
     }
 
-ISP_LOOKUP: dict[str, dict] = {
-    "apcp_htpb":    _build_prop_lookup("APCP_HTPB"),
-    "apcp_pban":    _build_prop_lookup("APCP_PBAN"),
-    "double_base":  _build_prop_lookup("DOUBLE_BASE"),
-}
+import functools
+
+@functools.lru_cache(maxsize=None)
+def get_isp_lookup(key: str) -> dict:
+    if key == "apcp_htpb":
+        return _build_prop_lookup("APCP_HTPB")
+    elif key == "apcp_pban":
+        return _build_prop_lookup("APCP_PBAN")
+    elif key == "double_base":
+        return _build_prop_lookup("DOUBLE_BASE")
+    return _build_prop_lookup(key.upper())
 
 MATERIAL_LOOKUP: dict[str, dict] = {
     "cf_epoxy":   _build_mat_lookup("CF_EPOXY"),
@@ -134,67 +140,7 @@ class InverseDesignEngine:
     TVC_THRESHOLD_SM = 1.2       # recommend TVC if SM < this
 
 
-    def _close_trajectory_loop(
-        self,
-        *,
-        m_prop_initial: float,
-        isp: float,
-        dry_mass_kg: float,
-        body_diameter_m: float,
-        t_burn_s: float,
-        target_altitude_m: float,
-        max_iter: int = 30,
-    ) -> tuple[float, float]:
-        """
-        Bisect on propellant mass until trajectory apogee matches target.
-        Returns (m_prop_corrected, t_burn_corrected).
 
-        Physics: for a fixed Isp and t_burn, thrust = m_prop*Isp*g0/t_burn.
-        As m_prop grows, both mass and thrust grow — apogee increases monotonically.
-        """
-        try:
-            from aegis_core.physics.trajectory import simulate_trajectory
-        except ImportError:
-            return m_prop_initial, t_burn_s
-
-        G0 = 9.80665
-
-        def apogee_for(mp: float) -> float:
-            F    = mp * isp * G0 / max(t_burn_s, 0.1)
-            dry  = dry_mass_kg + (mp - m_prop_initial) * 0.12  # extra structure
-            r    = simulate_trajectory(
-                thrust_n           = F,
-                burn_time_s        = t_burn_s,
-                propellant_mass_kg = mp,
-                dry_mass_kg        = max(dry, 1.0),
-                body_diameter_m    = body_diameter_m,
-            )
-            return r.apogee_m
-
-        # Fast check: does initial design already meet the target?
-        if apogee_for(m_prop_initial) >= target_altitude_m * 0.98:
-            return m_prop_initial, t_burn_s
-
-        # Bisect: find upper bound first
-        lo, hi = m_prop_initial, m_prop_initial
-        for _ in range(12):
-            hi *= 2.0
-            if apogee_for(hi) >= target_altitude_m:
-                break
-        else:
-            # Can't reach target — return best effort
-            return hi, t_burn_s
-
-        for _ in range(max_iter):
-            mid = (lo + hi) / 2.0
-            if apogee_for(mid) >= target_altitude_m:
-                hi = mid
-            else:
-                lo = mid
-            if (hi - lo) / max(lo, 1.0) < 0.005:   # 0.5% tolerance
-                break
-
-        return (lo + hi) / 2.0, t_burn_s
 
     def design(self, intent: MissionIntent, propellant_scale: float = 1.0) -> DesignProposal:
         suggestions: list[ImprovementSuggestion] = []
@@ -208,7 +154,7 @@ class InverseDesignEngine:
 
         # ── 2. Select propellant ────────────────────────────────────────────
         prop_key = self._select_propellant(intent.propellant, dv)
-        prop = ISP_LOOKUP[prop_key]
+        prop = get_isp_lookup(prop_key)
         # Use vacuum Isp for orbital / kick-stage missions — they operate at
         # near-zero back-pressure for most of the burn.
         # Sea-level Isp for sounding rockets is still appropriate (< 100 km, atm present).
@@ -498,7 +444,7 @@ class InverseDesignEngine:
         sc("grain_length",            round(seg_length, 4),    "m",        "L/D = 2.5 per segment")
         sc("n_segments",              n_segs,                  "—",        "Motor volume / segment volume")
         sc("web_thickness",           round(grain_od - grain_id, 4), "m",  "OD − ID")
-        port_area = 3.14159 * grain_id**2
+        port_area = math.pi * grain_id**2
         ptr = round(port_area / max(At, 1e-9), 2)
         sc("port_to_throat_ratio",    ptr,                     "—",        "A_port / A_throat")
         sc("volumetric_loading",      0.88,                    "—",        "Standard BATES loading fraction")
@@ -617,7 +563,7 @@ class InverseDesignEngine:
                 fin_span=fin_span, fin_root=round(body_od*1.3, 4),
                 fin_tip=round(body_od*1.3*0.5, 4),
                 fin_thickness=round(max(0.009, fin_span*0.06), 4),
-                n_fins=4, altitude_m=10_000)
+                n_fins=_n_fins, altitude_m=10_000)
             sc("cd_total",       round(drg.Cd_total, 4),       "—", "Full drag: wave+skin+base+fin+interference")
             sc("cd_wave",        round(drg.Cd_wave, 4),        "—", "Wave/pressure drag at Mach 2")
             sc("cd_base",        round(drg.Cd_base, 4),        "—", "Base drag")
@@ -626,7 +572,7 @@ class InverseDesignEngine:
             # CP vs Mach — store the subsonic and supersonic values
             cp_curve = cp_vs_mach(total_len_m, body_od, nose_len_m,
                                    round(body_od*1.3, 4), round(body_od*1.3*0.5, 4),
-                                   fin_span, math.radians(30.0), n_fins=4)
+                                   fin_span, math.radians(30.0), n_fins=_n_fins)
             cp_sub = next((v for m,v in cp_curve if m <= 0.6), None)
             cp_sup = next((v for m,v in cp_curve if m >= 2.0), None)
             sc("cp_location_subsonic",  round(cp_sub, 4) if cp_sub else 0, "m", "CP from nose at Mach 0.6")
@@ -639,7 +585,7 @@ class InverseDesignEngine:
                 payload_mass_kg=payload_m, nose_length=nose_len_m,
                 fin_root=round(body_od*1.3, 4), fin_span=fin_span,
                 fin_thickness=round(max(0.009, fin_span*0.06), 4),
-                n_fins=4, wall_thickness=wall_t)
+                n_fins=_n_fins, wall_thickness=wall_t)
             sc("Ixx",  round(moi.Ixx_kg_m2, 4), "kg·m²", "Axial (roll) moment of inertia")
             sc("Iyy",  round(moi.Iyy_kg_m2, 4), "kg·m²", "Lateral (pitch/yaw) moment of inertia")
             sc("Izz",  round(moi.Iyy_kg_m2, 4), "kg·m²", "= Iyy (axisymmetric vehicle)")

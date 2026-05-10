@@ -1,0 +1,55 @@
+/* aegis_ui/custom.css */
+
+/* Fix metric truncation */
+[data-testid="stMetricValue"] {
+    font-size: 1.4rem !important;
+    overflow: visible !important;
+    white-space: nowrap !important;
+}
+
+[data-testid="stMetricLabel"] {
+    font-size: 0.9rem !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+
+/* Tab header styling */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 24px;
+}
+.stTabs [data-baseweb="tab"] {
+    height: 50px;
+    white-space: pre-wrap;
+    background-color: transparent;
+    border-radius: 4px 4px 0px 0px;
+    gap: 1px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+}
+.stTabs [aria-selected="true"] {
+    border-bottom: 2px solid #6366F1 !important;
+}
+
+/* Make dataframe headers visible in dark mode */
+th {
+    background-color: #1E293B !important;
+    color: #E2E8F0 !important;
+}
+
+/* Status bar */
+.aegis-status-bar {
+    padding: 8px 16px;
+    background: #1E293B;
+    border-radius: 4px;
+    margin-bottom: 16px;
+    font-size: 0.85rem;
+    color: #94A3B8;
+    display: flex;
+    justify-content: space-between;
+    border-left: 4px solid #6366F1;
+}
+
+.aegis-status-bar strong {
+    color: #E2E8F0;
+}

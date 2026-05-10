@@ -1,0 +1,14 @@
+[project]
+name = "aegis-srm"
+version = "11.0.0"
+description = "Solid Rocket Motor Inverse Design"
+authors = [{ name = "AEGIS Team" }]
+requires-python = ">=3.9"
+dependencies = [
+    "streamlit",
+    "numpy",
+    "scipy",
+    "pandas",
+    "plotly",
+    "rocketcea"
+]

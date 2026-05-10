@@ -1,4 +1,12 @@
-"""
+
+import os
+
+target_path = r"c:\Users\allio\Downloads\aegis-srm-v11\aegis-srm\aegis_ui\pages\design_review.py"
+
+# I will reconstruct the file content here. 
+# I'll use the user's provided text but fix the identified corruptions.
+
+content = r"""\"\"\"
 AEGIS-SRM - Design Review Page
 Tab structure: Overview | Risks & Actions | Detailed Physics | Traceability
 
@@ -7,7 +15,7 @@ Design decisions (Linus review):
 - Human-readable labels throughout; raw parameter keys only in engineering detail mode.
 - Empty state offers three concrete next actions, not a bare info message.
 - No sidebar - summary lives on the page where it belongs.
-"""
+\"\"\"
 import streamlit as st
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
@@ -184,9 +192,9 @@ def render():
 
 
 def _render_vv_block_banner(vv):
-    """
+    \"\"\"
     Render a detailed, actionable failure panel when V&V hard gates block the design.
-    """
+    \"\"\"
     from aegis_core.vv.gates import GATE_MITIGATIONS, HARD_LIMITS
 
     failed = [g for g in vv.gates if g.blocks_simulation and g.status.value == "fail"]
@@ -245,82 +253,64 @@ def _render_vv_block_banner(vv):
 # -- Tab 1: Overview -----------------------------------------------------------
 
 def _tab_overview(outputs, snap, result, vv):
-    # Motor sketch as Hero Element
+    # Hero metrics
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total impulse",
+              f"{outputs.get('total_impulse', 0) / 1000:.1f} kN.s")
+    c2.metric("Burn time",
+              f"{outputs.get('burn_time', 0):.2f} s")
+    c3.metric("Peak chamber pressure",
+              f"{outputs.get('max_pressure', 0) / 1e6:.1f} MPa")
+    c4.metric("Estimated apogee",
+              f"{outputs.get('apogee_m', 0) / 1000:.1f} km")
+
+    st.divider()
+
+    # 4-cell design summary
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Propellant mass",    f"{_v(outputs, snap, 'propellant_mass'):.1f} kg")
+    c2.metric("Case material",
+              str(_v(outputs, snap, "case_material", "-")).replace("_", " ").title())
+    c3.metric("Hoop safety factor", f"{_v(outputs, snap, 'safety_factor'):.2f}",
+              delta=">= 1.5 required", delta_color="off")
+    c4.metric("Static margin",      f"{_v(outputs, snap, 'static_margin'):.2f} cal",
+              delta=">= 1.5 cal stable", delta_color="off")
+
+    # Nozzle material
+    nz_mat = _v(outputs, snap, "nozzle_material", "")
+    if nz_mat:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Nozzle material",
+                  str(nz_mat).replace("_", " ").title())
+        c2.metric("Nozzle max temperature",
+                  f"{_v(outputs, snap, 'nozzle_max_temp'):.0f} C"
+                  if _v(outputs, snap, "nozzle_max_temp") else "-")
+        c3.metric("Erosion rate",
+                  f"{_v(outputs, snap, 'erosion_rate'):.3f} mm/s"
+                  if _v(outputs, snap, "erosion_rate") else "-")
+        c4.metric("Throat diameter",
+                  f"{_v(outputs, snap, 'throat_diameter') * 1000:.1f} mm")
+
+    st.divider()
+
+    # Motor sketch
     try:
         st.subheader("Motor cross-section")
         _motor_sketch(snap, outputs)
     except Exception as e:
         st.caption(f"Motor sketch unavailable: {e}")
 
-    st.divider()
-
-    # Hero metrics
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total impulse", f"{outputs.get('total_impulse', 0) / 1000:.1f} kN·s")
-    c2.metric("Burn time", f"{outputs.get('burn_time', 0):.2f} s")
-    c3.metric("Peak Pc", f"{outputs.get('max_pressure', 0) / 1e6:.1f} MPa")
-    c4.metric("Apogee", f"{outputs.get('apogee_m', 0) / 1000:.1f} km")
-
-    # Reference motor comparison
-    st.subheader("Reference comparison")
-    try:
-        from aegis_core.data.research_db import REFERENCE_MOTORS
-        design_impulse = outputs.get('total_impulse', 0)
-        
-        # Find closest reference motor by total impulse log difference
-        import math
-        if design_impulse > 0:
-            closest = min(REFERENCE_MOTORS.items(), 
-                          key=lambda x: abs(math.log10(x[1]["total_impulse"].value) - math.log10(design_impulse)) if "total_impulse" in x[1] else float('inf'))
-            closest_name = closest[0]
-            closest_imp = closest[1]["total_impulse"].value
-            
-            # Simple log scale bar
-            import numpy as np
-            min_imp = 1000 # 1 kN.s
-            max_imp = 1e8  # 100,000 kN.s
-            
-            def scale_pos(imp):
-                return max(0, min(100, (math.log10(max(imp, min_imp)) - math.log10(min_imp)) / (math.log10(max_imp) - math.log10(min_imp)) * 100))
-                
-            pos_design = scale_pos(design_impulse)
-            pos_ref = scale_pos(closest_imp)
-            
-            html = f"""
-            <div style="font-family: monospace; background: #1E293B; padding: 10px; border-radius: 5px;">
-                <div style="position: relative; height: 30px; border-bottom: 1px solid #475569;">
-                    <div style="position: absolute; left: {pos_design}%; top: 5px; color: #10B981;">▼ Your design ({design_impulse/1000:,.0f} kN·s)</div>
-                    <div style="position: absolute; left: {pos_ref}%; top: -10px; color: #94A3B8;">▲ {closest_name} ({closest_imp/1000:,.0f} kN·s)</div>
-                </div>
-            </div>
-            """
-            st.markdown(html, unsafe_allow_html=True)
-    except Exception as e:
-        st.caption("Reference comparison unavailable.")
 
     st.divider()
 
-    with st.expander("Secondary engineering metrics", expanded=False):
-        # 4-cell design summary
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Propellant mass",    f"{_v(outputs, snap, 'propellant_mass'):.1f} kg")
-        c2.metric("Case material", str(_v(outputs, snap, "case_material", "-")).replace("_", " ").title())
-        c3.metric("Hoop sf", f"{_v(outputs, snap, 'safety_factor'):.2f}", delta=">= 1.5 req", delta_color="off")
-        c4.metric("Static margin", f"{_v(outputs, snap, 'static_margin'):.2f} cal", delta=">= 1.5 cal stable", delta_color="off")
-
-        # Nozzle material
-        nz_mat = _v(outputs, snap, "nozzle_material", "")
-        if nz_mat:
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Nozzle material", str(nz_mat).replace("_", " ").title())
-            c2.metric("Nozzle T_max", f"{_v(outputs, snap, 'nozzle_max_temp'):.0f} C" if _v(outputs, snap, "nozzle_max_temp") else "-")
-            c3.metric("Erosion rate", f"{_v(outputs, snap, 'erosion_rate'):.3f} mm/s" if _v(outputs, snap, "erosion_rate") else "-")
-            c4.metric("Throat Ø", f"{_v(outputs, snap, 'throat_diameter') * 1000:.1f} mm")
-
-        # P(failure) from UQ
-        if result.uq_result:
-            pf = result.uq_result.failure_probability * 100
-            st.metric("P(failure) - UQ", f"{pf:.3f}%", delta=f"{result.uq_result.n_samples} samples", delta_color="off")
+    # P(failure) from UQ
+    if result.uq_result:
+        pf = result.uq_result.failure_probability * 100
+        color = "normal" if pf < 1.0 else "inverse"
+        st.metric("P(failure) - Monte Carlo UQ",
+                  f"{pf:.3f}%",
+                  delta=f"{result.uq_result.n_samples} samples",
+                  delta_color="off")
 
 
 def _motor_sketch(snap, outputs=None):
@@ -376,7 +366,7 @@ def _motor_sketch(snap, outputs=None):
     N_FRAMES = 12
     frame_idx = st.slider(
         "Burn progression", 0, N_FRAMES - 1, 0,
-        format="t = %d/11",
+        format=f"t = %d/{N_FRAMES-1}",
         help="Scrub to see grain regression and throat erosion over time."
     )
     burn_frac = frame_idx / max(N_FRAMES - 1, 1)
@@ -432,7 +422,7 @@ def _motor_sketch(snap, outputs=None):
             fillcolor=COLORS["case"], line=dict(color="#334155", width=1),
             name="Case wall", legendgroup="case",
             showlegend=(sign == 1),
-            hovertemplate="Motor case<extra></extra>",
+            hovertemplate=f"Motor case<extra></extra>",
         ), row=1, col=1)
 
     # -- 2. EPDM liner -----------------------------------------------------
@@ -446,7 +436,7 @@ def _motor_sketch(snap, outputs=None):
             fillcolor=COLORS["liner"], line=dict(color="#713f12", width=0.5),
             name="EPDM liner", legendgroup="liner",
             showlegend=(sign == 1),
-            hovertemplate="EPDM liner<extra></extra>",
+            hovertemplate=f"EPDM liner<extra></extra>",
         ), row=1, col=1)
 
     # -- 3. Propellant grain segments ---------------------------------------
@@ -480,7 +470,7 @@ def _motor_sketch(snap, outputs=None):
         line=dict(color="#1e293b", width=0.5),
         name="Central port", legendgroup="port",
         showlegend=True,
-        hovertemplate="Hot gas port<extra></extra>",
+        hovertemplate=f"Hot gas port<extra></extra>",
         opacity=0.85,
     ), row=1, col=1)
 
@@ -512,8 +502,8 @@ def _motor_sketch(snap, outputs=None):
         x=nose_xs, y=nose_ys, fill="toself",
         fillcolor=COLORS["nose"], opacity=0.9,
         line=dict(color="#334155", width=1),
-        name="Nose cone", legendgroup="nose",
-        hovertemplate="Nose cone<extra></extra>",
+        name=f"Nose cone", legendgroup="nose",
+        hovertemplate=f"Nose cone<extra></extra>",
     ), row=1, col=1)
 
     # -- 7. Nozzle ---------------------------------------------------------
@@ -535,7 +525,7 @@ def _motor_sketch(snap, outputs=None):
         fillcolor=COLORS["nozzle"], opacity=0.95,
         line=dict(color="#44403c", width=1.5),
         name="Nozzle", legendgroup="nozzle",
-        hovertemplate="Nozzle<extra></extra>",
+        hovertemplate=f"Nozzle<extra></extra>",
     ), row=1, col=1)
 
     # -- 8. Fins -----------------------------------------------------------
@@ -570,55 +560,21 @@ def _motor_sketch(snap, outputs=None):
             hovertemplate=f"Fin {i+1}<extra></extra>",
         ), row=1, col=1)
 
-    # -- 9. CG / CP Markers ------------------------------------------------
-    cg_loc = vs("cg_location", 0.0)
-    cp_loc = vs("cp_location_subsonic", 0.0)
-    
-    if cg_loc > 0:
-        fig.add_trace(go.Scatter(
-            x=[cg_loc * S, cg_loc * S], y=[0, R_px * 1.5],
-            mode="lines+markers", line=dict(color="#10B981", width=2, dash="dot"),
-            marker=dict(symbol="triangle-down", size=12, color="#10B981"),
-            name="CG", hovertemplate=f"CG: {cg_loc*1000:.0f} mm<extra></extra>"
-        ), row=1, col=1)
-        
-    if cp_loc > 0:
-        fig.add_trace(go.Scatter(
-            x=[cp_loc * S, cp_loc * S], y=[0, -R_px * 1.5],
-            mode="lines+markers", line=dict(color="#EF4444", width=2, dash="dot"),
-            marker=dict(symbol="diamond", size=10, color="#EF4444"),
-            name="CP", hovertemplate=f"CP: {cp_loc*1000:.0f} mm<extra></extra>"
-        ), row=1, col=1)
-
     # -- 10. Performance time-history plot ----------------------------------
     import numpy as np
-    
-    t_series = outputs.get("thrust_time_s")
-    F_series = outputs.get("thrust_profile_n")
-    p_series = outputs.get("pressure_profile_pa")
-    
-    if t_series and F_series and len(t_series) == len(F_series):
-        t_arr = np.array(t_series)
-        F_arr = np.array(F_series)
-        if p_series and len(p_series) == len(t_series):
-            Pc_arr = np.array(p_series)
-        else:
-            Pc_arr = F_arr / max(thrust_pk, 1) * Pc_peak
-    else:
-        t_arr = np.linspace(0, burn_time, 60)
+    t_arr = np.linspace(0, burn_time, 60)
 
-        def _thrust_curve(t, t_burn, F_avg):
-            ramp = min(t / (t_burn * 0.08), 1.0)
-            tail = min((t_burn - t) / (t_burn * 0.12), 1.0)
-            prog = min(ramp, tail)
-            return F_avg * 1.15 * prog
+    def _thrust_curve(t, t_burn, F_avg):
+        ramp = min(t / (t_burn * 0.08), 1.0)
+        tail = min((t_burn - t) / (t_burn * 0.12), 1.0)
+        prog = min(ramp, tail)
+        return F_avg * 1.15 * prog
 
-        def _pc_curve(t, t_burn, Pc_peak):
-            return _thrust_curve(t, t_burn, Pc_peak)
+    def _pc_curve(t, t_burn, Pc_peak):
+        return _thrust_curve(t, t_burn, Pc_peak)
 
-        F_arr  = np.array([_thrust_curve(t, burn_time, thrust_pk) for t in t_arr])
-        Pc_arr = np.array([_pc_curve(t, burn_time, Pc_peak) for t in t_arr])
-        
+    F_arr  = np.array([_thrust_curve(t, burn_time, thrust_pk) for t in t_arr])
+    Pc_arr = np.array([_pc_curve(t, burn_time, Pc_peak) for t in t_arr])
     t_now = burn_frac * burn_time
 
     fig.add_trace(go.Scatter(
@@ -679,47 +635,26 @@ def _motor_sketch(snap, outputs=None):
 
 def _tab_risks(outputs, snap, result, vv):
     if vv:
-        gates = vv.gates
+        hard_fail = [g for g in vv.gates if g.status.value == "fail"]
+        advisories = [g for g in vv.gates if g.status.value == "warn"]
+        passing    = [g for g in vv.gates if g.status.value == "pass"]
     else:
-        gates = []
+        hard_fail = advisories = passing = []
 
-    st.subheader("Verification & Validation Heatmap")
-    
-    if not gates:
-        st.info("No V&V data available.")
-        return
-        
-    import pandas as pd
-    
-    heatmap_data = []
-    for g in gates:
-        status_color = "🟢 PASS" if g.status.value == "pass" else ("🟡 WARN" if g.status.value == "warn" else "🔴 FAIL")
-        from aegis_core.vv.gates import HARD_LIMITS
-        _, threshold, unit, _ = HARD_LIMITS.get(g.name, ("", g.threshold, g.unit, ""))
-        
-        heatmap_data.append({
-            "Gate": g.name.replace("_", " ").title(),
-            "Measured": f"{g.measured:.3g} {unit}",
-            "Requirement": f"{threshold} {unit}",
-            "Status": status_color,
-            "Message": g.message
-        })
-        
-    if heatmap_data:
-        df = pd.DataFrame(heatmap_data)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        
-    # Show mitigations for fails
-    hard_fails = [g for g in gates if g.status.value == "fail"]
-    if hard_fails:
-        st.subheader("Required Actions")
-        from aegis_core.vv.gates import GATE_MITIGATIONS
-        for g in hard_fails:
-            with st.expander(f"🔴 Fix {g.name.replace('_', ' ').title()}", expanded=True):
-                st.write(g.message)
-                mitigs = GATE_MITIGATIONS.get(g.name, [])
-                for m in mitigs:
-                    st.markdown(f"- {m}")
+    if hard_fail:
+        for g in hard_fail:
+            st.error(
+                f"**HARD FAIL - {g.name.replace('_', ' ').title()}**"
+            )
+
+    if not hard_fail and not advisories:
+        st.success("All V&V gates passed - no risks or advisories.")
+
+    if advisories:
+        st.subheader(f"Advisories ({len(advisories)})")
+        for g in advisories:
+            with st.expander(f"[Warn] {g.name.replace('_', ' ').title()}"):
+                st.write(g.message if hasattr(g, "message") else "")
 
     tr = outputs.get("test_requirements") or {}
     if tr:
@@ -728,6 +663,11 @@ def _tab_risks(outputs, snap, result, vv):
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Load cell rating",    f"{tr.get('load_cell_rating_kn', 0):.1f} kN")
         c2.metric("Blast zone radius",   f"{tr.get('blast_zone_radius_m', 0):.1f} m")
+
+    if passing:
+        with st.expander(f"Passing gates ({len(passing)})", expanded=False):
+            for g in passing:
+                st.success(f"v {g.name.replace('_', ' ').title()}")
 
 
 # -- Tab 3: Detailed Physics ---------------------------------------------------
@@ -799,3 +739,9 @@ def _add_row(rows, grp, k, v, show_key=False):
     if show_key:
         row["key"] = k
     rows.append(row)
+\"\"\"
+
+with open(target_path, 'w', encoding='utf-8') as f:
+    f.write(content)
+
+print(f"Successfully healed {target_path}")
